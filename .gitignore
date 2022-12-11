@@ -1,0 +1,8 @@
+.DS_Store
+.ipynb_checkpoints
+*.pyc
+Untitled.ipynb
+Untitled[a-zA-Z0-9].ipynb
+.env
+*.flac
+*.mp3
