@@ -7,5 +7,5 @@ Untitled[a-zA-Z0-9].ipynb
 *.flac
 *.mp3
 cmdnb.ipynb
-logs
-models
+# logs
+# models
