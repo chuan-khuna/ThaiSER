@@ -7,6 +7,8 @@ class BaseMultiHeadedAttentionBlock(keras.layers.Layer):
     - perform attention mechanism
     - residual connection x, attention(x)
 
+    This block takes data in shape (batch, seq, embedding) as input
+
     Args:
         keras (_type_): _description_
     """
