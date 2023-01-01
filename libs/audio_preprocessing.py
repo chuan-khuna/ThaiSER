@@ -1,106 +1,150 @@
-import numpy as np
+import json
 import tensorflow as tf
 import tensorflow_io as tfio
+import numpy as np
 
 
 class AudioPreprocessor:
-    """
-    A preprocessor utils for 1 audio sample
-
-    - This will process only audio data, not include labels
-    - This will prepare audio data for training and testing, demoing
-    - for training process you should call this in your own wrapper
-    """
 
     def __init__(self):
+        self.sampling_rate = 16000
 
-        # audio to spectrogram setting
-        # window length must <= nfft
+        # spectrorgram setting
         self.nfft = 512
-        self.window_length = 512
-        # aka hop length
+        self.window = 512
         self.stride = 256
 
         # spectrogram to melspectrogram setting
-        self.mel_sr = 44100
         self.n_mels = 128
         self.max_db = 80
 
-        # setting for CNN layer
-        self.img_h = 128
-        self.img_w = 1024
-        self.img_ch = 3
+        # padding/truncating (sec)
+        self.pad_length = 30
 
-    def from_file(self, filename: str) -> tf.Tensor:
-        """Use tensorflow utils to read audio file(.flac)
+    def from_json(self, file: str):
+        with open(file, "r") as f:
+            setting = json.load(f)
+
+        for k in self.__dict__.keys():
+            self.__dict__[k] = setting[k]
+
+    def save_setting(self, file: str):
+        with open(file, "w") as f:
+            f.write(json.dumps(self.__dict__, indent=2))
+
+    def _resampling(self, audio_tensor: tf.Tensor, rate: int) -> tf.Tensor:
+        """resampling audio tensor from the original sampling rate `rate` to `self.sampling_rate`
+
+        Args:
+            audio_tensor (tf.Tensor): audio tensor in shape `(length, )`
+            rate (int): sampling rate of the original audio
+
+        Returns:
+            tf.Tensor: resampled audio tensor in shape `(length, )`
         """
-        file_content = tf.io.read_file(filename)
-        audio_tensor = tfio.audio.decode_flac(file_content, dtype=tf.int16)
-        audio_tensor = audio_tensor[:, 0]
+        if (self.sampling_rate != rate) and (self.sampling_rate is not None):
+            audio_tensor = tfio.audio.resample(audio_tensor, rate, self.sampling_rate)
         return audio_tensor
 
-    def from_array(self, array: np.ndarray):
-        """get 1-d numpy array and convert into 1-d tensor
-        """
-        return tf.constant(array)
+    def _normalise(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        """Normalise audio tensor by dividing the max value of int16 `32768.0`
 
-    def _normalize(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        Args:
+            audio_tensor (tf.Tensor): audio tensor in shape `(length, )`
+
+        Returns:
+            tf.Tensor: audio tensor in shape `(length, )`
+        """
         # https://www.tensorflow.org/io/tutorials/audio
-        return tf.cast(audio_tensor, tf.float32) / tf.constant(32768.0)
+        # https://keras.io/examples/audio/transformer_asr/#preprocess-the-dataset
+        audio_tensor = tf.cast(audio_tensor, tf.float32) / tf.cast(tf.int16.max + 1,
+                                                                   dtype=tf.float32)
+        return audio_tensor
+
+    def _pad_signal(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        audio_tensor = tf.keras.utils.pad_sequences(audio_tensor[tf.newaxis, :],
+                                                    maxlen=self.length * self.sampling_rate,
+                                                    dtype='float32',
+                                                    padding='post')
+        return tf.squeeze(audio_tensor)
 
     def _to_spectrogram(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        """Convert audio wave tensor to spectrogram tensor
+
+        Args:
+            audio_tensor (tf.Tensor): audio tensor in shape `(length, )`
+
+        Returns:
+            tf.Tensor: spectrogram tensor in shape `(spec length, features)
+        """
         spectogram_tensor = tfio.audio.spectrogram(audio_tensor,
                                                    nfft=self.nfft,
-                                                   window=self.window_length,
+                                                   window=self.window,
                                                    stride=self.stride)
         return spectogram_tensor
 
     def _spectrogram_to_melspectrogram(self, spectogram_tensor: tf.Tensor) -> tf.Tensor:
-        melspec_tensor = tfio.audio.melscale(spectogram_tensor,
-                                             rate=self.mel_sr,
-                                             mels=self.n_mels,
-                                             fmin=0,
-                                             fmax=int(self.mel_sr // 2))
-        return melspec_tensor
-
-    def _melspec_to_db_mel_spec(self, melspec_tensor: tf.Tensor) -> tf.Tensor:
-        return tfio.audio.dbscale(melspec_tensor, top_db=self.max_db)
-
-    def _expand_dims(self, tensor: tf.Tensor) -> tf.Tensor:
-        return tf.repeat(tf.expand_dims(tensor, -1), self.img_ch, -1)
-
-    def _swap_axis(self, tensor: tf.Tensor) -> tf.Tensor:
-        return tf.transpose(tensor, perm=[1, 0, 2])
-
-    def _resize_img(self, tensor: tf.Tensor) -> tf.Tensor:
-        return tf.image.resize(tensor, size=(self.img_h, self.img_w))
-
-    def _to_timestep_first(self, tensor: tf.Tensor) -> tf.Tensor:
-        """Convert an image-like spectrogram of (h, w, ch) = (freq, time, ch)
-        to an RNN-input, ie (time, freq)
-        """
-        tensor = self._swap_axis(tensor)
-        return tf.squeeze(tensor)
-
-    def preprocess(self, audio_tensor: tf.Tensor) -> tf.Tensor:
-        """preprocess audio data
-        from 1-d audio tensor to db melspectrogram image
+        """convert spectrogram to mel-spectrogram
 
         Args:
-            audio_tensor (tf.Tensor): 1-d audio tensor in shape (n, ) and type int16
-            eg [1, 2, 3, ...]
+            spectogram_tensor (tf.Tensor): tensor in shape `(spec length, features)`
 
         Returns:
-            tf.Tensor: a melspectrogram tensor in db; compatible with CNN - (h, w, ch) = (feature, timestep, channel)
+            tf.Tensor: tensor in shape `(spec length, features)`
         """
-        # preprocessing audio file
-        tensor = self._normalize(audio_tensor)
-        tensor = self._to_spectrogram(tensor)
-        tensor = self._spectrogram_to_melspectrogram(tensor)
-        tensor = self._melspec_to_db_mel_spec(tensor)
+        melspec_tensor = tfio.audio.melscale(spectogram_tensor,
+                                             rate=self.sampling_rate,
+                                             mels=self.n_mels,
+                                             fmin=0,
+                                             fmax=int(self.sampling_rate // 2))
+        return melspec_tensor
 
-        # convert a melspectrogram array to an image array for CNN
-        tensor = self._expand_dims(tensor)
-        tensor = self._swap_axis(tensor)
-        tensor = self._resize_img(tensor)
-        return tensor
+    def _melspec_to_db_melspec(self, melspec_tensor: tf.Tensor) -> tf.Tensor:
+        return tfio.audio.dbscale(melspec_tensor, top_db=self.max_db)
+
+    def _process_audio_tensor_to_melspectrogram(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        """A wrapper function to process audio wave to mel-spectrogram(db scale)
+
+        Args:
+            audio_tensor (tf.Tensor): audio tensor in shape `(length, )`
+
+        Returns:
+            tf.Tensor: spectrogram tensor in shape `(spec length, features)
+        """
+        spec = self._to_spectrogram(audio_tensor)
+        mel_spec = self._spectrogram_to_melspectrogram(spec)
+        mel_spec_db = self._melspec_to_db_melspec(mel_spec)
+        return mel_spec_db
+
+    def _audio_tensor_from_file(self, filename: str) -> tf.Tensor:
+        """Load audio wave from `.flac` file
+
+        Args:
+            filename (str): _description_
+
+        Returns:
+            tf.Tensor: tensor in shape `(length, )`
+        """
+
+        content = tfio.IOTensor.graph(tf.int16).from_audio(filename)
+        rate = content.rate.numpy()
+        audio_tensor = content.to_tensor()
+        audio_tensor = tf.squeeze(audio_tensor[:, 0])
+        return audio_tensor, rate
+
+    def preprocess(self, filename: str) -> tf.Tensor:
+        """Preprocess an audio file
+
+        Args:
+            filename (str): _description_
+
+        Returns:
+            tf.Tensor: 2 tensors, audio wave and mel-spectrogram
+        """
+
+        audio_tensor, rate = self._audio_tensor_from_file(filename)
+        audio_tensor = self._resampling(audio_tensor, rate)
+        audio_tensor = self._normalise(audio_tensor)
+        audio_tensor = self._pad_signal(audio_tensor)
+        mel_spec = self._process_audio_tensor_to_melspectrogram(audio_tensor)
+        return audio_tensor, mel_spec
