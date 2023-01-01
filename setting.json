@@ -1,9 +1,0 @@
-{
-  "sampling_rate": 16000,
-  "nfft": 512,
-  "window": 512,
-  "stride": 256,
-  "n_mels": 128,
-  "max_db": 80,
-  "length": 30
-}

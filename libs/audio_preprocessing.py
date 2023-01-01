@@ -70,11 +70,26 @@ class AudioPreprocessor:
         Returns:
             tf.Tensor: audio tensor in shape (pad_duration(sec) * sampling_rate, )
         """
-        audio_tensor = tf.keras.utils.pad_sequences(audio_tensor[tf.newaxis, :],
-                                                    maxlen=self.pad_duration * self.sampling_rate,
-                                                    dtype='float32',
-                                                    padding='post')
-        return tf.squeeze(audio_tensor)
+        # https://keras.io/examples/audio/transformer_asr/#preprocess-the-dataset
+
+        # deprecated
+        # audio_tensor = tf.keras.utils.pad_sequences(audio_tensor[tf.newaxis, :],
+        #                                             maxlen=self.pad_duration * self.sampling_rate,
+        #                                             dtype='float32',
+        #                                             padding='post')
+
+        max_len = self.pad_duration * self.sampling_rate
+        audio_len = tf.shape(audio_tensor)[0]
+
+        if audio_len > max_len:
+            pad_len = 0
+        else:
+            pad_len = max_len - audio_len
+
+        paddings = [[0, 0], [0, pad_len]]
+        audio_tensor = tf.pad(audio_tensor[tf.newaxis], paddings)
+        audio_tensor = tf.squeeze(audio_tensor)[:max_len]
+        return audio_tensor
 
     def _to_spectrogram(self, audio_tensor: tf.Tensor) -> tf.Tensor:
         """Convert audio wave tensor to spectrogram tensor
@@ -135,7 +150,7 @@ class AudioPreprocessor:
         """
 
         content = tfio.IOTensor.graph(tf.int16).from_audio(filename)
-        rate = content.rate.numpy()
+        rate = tf.cast(content.rate, dtype=tf.int64)
         audio_tensor = content.to_tensor()
         audio_tensor = tf.squeeze(audio_tensor[:, 0])
         return audio_tensor, rate
