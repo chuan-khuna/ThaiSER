@@ -19,7 +19,7 @@ class AudioPreprocessor:
         self.max_db = 80
 
         # padding/truncating (sec)
-        self.pad_length = 30
+        self.pad_duration = 30
 
     def from_json(self, file: str):
         with open(file, "r") as f:
@@ -62,8 +62,16 @@ class AudioPreprocessor:
         return audio_tensor
 
     def _pad_signal(self, audio_tensor: tf.Tensor) -> tf.Tensor:
+        """pad/trim wave tensor to shape `pad_duration(sec) * sampling_rate`
+
+        Args:
+            audio_tensor (tf.Tensor): _description_
+
+        Returns:
+            tf.Tensor: audio tensor in shape (pad_duration(sec) * sampling_rate, )
+        """
         audio_tensor = tf.keras.utils.pad_sequences(audio_tensor[tf.newaxis, :],
-                                                    maxlen=self.length * self.sampling_rate,
+                                                    maxlen=self.pad_duration * self.sampling_rate,
                                                     dtype='float32',
                                                     padding='post')
         return tf.squeeze(audio_tensor)
