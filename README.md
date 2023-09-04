@@ -17,3 +17,7 @@ TOKEN = os.getenv('git_token')
 
 !git remote set-url origin https://{TOKEN}@github.com/chuan-khuna/ThaiSER.git
 ```
+
+## Best Result I can achieve
+
+<img src="./20230103-0252.jpg" alt="result-card" width="800"/>
